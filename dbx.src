@@ -1,0 +1,110 @@
+hS = get_shell
+hC = hS.host_computer
+
+cBorder  = "<color=#194721><b>"
+cX       = "</color></b>"
+cA  = "<color=#35c44d><b>"
+cW  = "<color=#dfe6e0><b>"
+cError  = "<color=#b51f2b><b>"
+cGood  = "<color=#3b42c4><b>"
+
+if active_user != "root" then
+    print(cError + "Run as root!" + cX)
+    exit
+end if
+
+hopList = []
+
+menuSelect = function(title, options)
+    print cBorder + title + cX + char(10)
+    i = 1
+    for opt in options
+        print cW + "  [" + i + "] " + cX + cGood + opt + cX
+        i = i + 1
+    end for
+    while true
+        choice = user_input(cA + char(10) + "Select: " + cX, false, true).to_int
+        if typeof(choice) == "number" and choice >= 1 and choice <= options.len then
+            return choice
+        end if
+        print cError + "Invalid selection." + cX
+    end while
+end function
+
+showBanner = function()
+    //clear_screen()
+	print cBorder + "╔═══════════════════════════════╗" + cX
+	print cBorder + "║  " + cX + cA + "           d b x          " + cX + cBorder + "   ║" + cX
+	print cBorder + "╠═══════════════════════════════╣" + cX
+end function
+
+getHops = function(c)
+	hopFile = c.File("/root/hopFile")
+	if hopFile == null then 
+		c.touch("/root", "hopFile")
+		hopFile = c.File("/root/hopFile")
+	end if
+	globals.hopList = hopFile.get_content.split(char(10))
+end function
+
+alterHops = function(c)
+	getHops(c)
+	hopFile = c.File("/root/hopFile")
+    while true
+		hopList = hopFile.get_content.split(char(10))
+		ahopList = hopList + ["New Hop", "Exit"]
+		choice = menuSelect("Alter Hops - Item Select", ahopList)
+		if choice == ahopList.len then 
+			break
+		else if choice == ahopList.len - 1 then
+			input = user_input(cA + char(10) + "New Entry: " + cX)
+			if input != "" then hopList.push(input)
+		else
+			input = user_input(cA + char(10) + "Replacing entry(empty for rm) " + choice + ": " + cX)
+			if input == "" then 
+				hopList.remove(choice - 1)
+			else
+				hopList[choice - 1] = input
+			end if
+		end if
+		hopFile.set_content(hopList.join(char(10)))
+	end while
+	main(c)
+end function
+
+shellEnd = function(s)
+	shell = []
+	shell.push(s)
+	i = 0
+	for hop in globals.hopList
+		addr = hop.split("@")[1]
+		pw = hop.split("@")[0]
+		shell.push(shell[i].connect_service(addr, 22, "root", pw))
+		i = i + 1
+	end for
+	shell[i].launch("/usr/bin/Terminal.exe")
+end function
+
+main = function(c, s)
+	while true
+		showBanner()
+		choice = menuSelect("MAIN MENU", [
+			"Start mon",
+			"Alter Hops",
+			"Shell @ end",
+			"Exit",
+		])
+		if choice == 1 then
+			hS.launch("/usr/bin/Terminal.exe", "/root/mon")
+		else if choice == 2 then
+			alterHops(c)
+		else if choice == 3 then
+			getHops(c)
+			shellEnd(s)
+		else
+			exit
+		end if
+	end while
+end function
+
+main(hC, hS)

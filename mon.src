@@ -1,0 +1,114 @@
+s = get_shell
+c = s.host_computer
+
+cBorder  = "<color=#194721><b>"
+cX       = "</color></b>"
+cA  = "<color=#35c44d><b>"
+cW  = "<color=#dfe6e0><b>"
+cError  = "<color=#b51f2b><b>"
+cGood  = "<color=#3b42c4><b>"
+
+if active_user != "root" then
+    print(cError + "Run as root!" + cX)
+    exit
+end if
+
+hopList = []
+hopMonList = []
+
+monList = [
+	{"name": "Host Log: ", "color": cError , "value": "Bad"},
+	{"name": "Host Proc: ", "color": cError , "value": "Bad"},
+	{"name": "Host Perm: ", "color": cError , "value": "Bad"},
+]
+
+showBanner = function()
+    clear_screen()
+	print cBorder + "╔════════════════════════════════╗" + cX
+	print cBorder + "║  " + cX + cA + "            m o n    1.0   " + cX + cBorder + "   ║" + cX
+	print cBorder + "╠════════════════════════════════╣" + cX
+end function
+
+display = function(tick)
+	showBanner()
+	//print items perms
+	for item in globals.monList + globals.hopMonList
+		spaceAdjust = ""
+		itemLen = item.name.len + item.value.len
+		if itemLen < 27 then spaceAdjust = " "*(27 - itemLen)
+		print cBorder + "╠═ " + cX + cW + item.name + item.color + item.value + spaceAdjust + cX + cBorder + " ══╣" + cX
+	end for
+	print cBorder + "╠════════════════════════════════╣" + cX
+	if tick == 4 then print cBorder + "╠" + cW + "════                            " + cBorder + "╣" + cX
+	if tick == 3 then print cBorder + "╠" + cW + "═════════                       " + cBorder + "╣" + cX
+	if tick == 2 then print cBorder + "╠" + cW + "════════════════                " + cBorder + "╣" + cX
+	if tick == 1 then print cBorder + "╠" + cW + "════════════════════════        " + cBorder + "╣" + cX
+	if tick == 0 then print cBorder + "╠" + cW + "════════════════════════════════" + cBorder + "╣" + cX
+	print cBorder + "╚════════════════════════════════╝" + cX
+end function
+
+checkLogs = function(c, ml)
+	logStatus = "Bad "
+	log = c.File("/var/system.log")
+	if log == null then 
+		ml.color = cGood
+		ml.value = "Good"
+	end if
+	return ml
+end function
+
+fixLogs = function(c)
+	log = c.File("/var/system.log")
+	blog = c.File("/var/system.log.bkp")
+	if blog != null and log != null then blog.delete
+	if log != null then
+		log.delete
+		log.move("/var", "system.log.bkp")
+	end if
+end function
+
+getHops = function(s, c)
+	tml = {"name": "Hop 1: ", "color": cError , "value": "Bad"}
+	hopFile = c.File("/root/hopFile")
+	if hopFile == null then 
+		c.touch("/root", "hopFile")
+		hopFile = c.File("/root/hopFile")
+	end if
+	hopList = hopFile.get_content.split(char(10))
+	globals.hopMonList = []
+	shell = []
+	shell.push(s)
+	i = 0
+	for hop in hopList
+		addr = hop.split("@")[1]
+		pw = hop.split("@")[0]
+		shell.push(shell[i].connect_service(addr, 22, "root", pw))
+		i = i + 1
+	end for
+	i = 0
+	for sh in shell
+		i = i + 1
+		if i == 1 then continue
+		co = sh.host_computer
+		fixLogs(co)
+		// Clear logs on router too
+		rshe = sh.connect_service("192.168.0.1", 22, "root", pw)
+		fixLogs(rshe)
+		ml = checkLogs(co, tml)
+		globals.hopMonList.push({"name": "Hop " + (i-1) + " " + hopList[i-2].split("@")[1] + ": ", "color": ml.color , "value": ml.value})
+	end for
+end function
+
+while true
+	for i in range(4)
+		wait(1)
+		if i == 4 then fixLogs(c)
+		//check logs
+		monList[0] = checkLogs(c, monList[0])
+		//check hops
+		if i == 2 then getHops(s, c)
+		//check proc
+		//check perms
+		display(i)
+	end for
+end while
