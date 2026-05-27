@@ -1,22 +1,30 @@
 if params.len != 1 or params[0] == "-h" or params[0] == "--help" then exit("<b>Usage: "+program_path.split("/")[-1]+" [ip_address]</b>")
 
-mx = include_lib("/lib/metaxploit.so")
-if not mx then
-    mx = include_lib(current_path + "/metaxploit.so")
-end if
-if not mx then exit("Error: Can't find metaxploit library in the /lib path or the current folder")
-if not is_valid_ip(params[0]) then exit("nmap: invalid ip address")
-tgtAddr = params[0]
-
-s = get_shell
-c = s.host_computer
-
 cBorder  = "<color=#194721><b>"
 cX       = "</color></b>"
 cA  = "<color=#35c44d><b>"
 cW  = "<color=#dfe6e0><b>"
 cError  = "<color=#b51f2b><b>"
 cGood  = "<color=#3b42c4><b>"
+
+s = get_shell
+c = s.host_computer
+
+mx = include_lib("/lib/metaxploit.so")
+if not mx then
+    mx = include_lib(current_path + "/metaxploit.so")
+end if
+if not mx then
+	choice = user_input(cA + char(10) + "HACKSHOP IP: " + cX, false, false)  
+    get_shell.launch("/bin/apt-get", "update")
+    get_shell.launch("/bin/apt-get", "addrepo " + choice)
+    get_shell.launch("/bin/apt-get", "update")
+    get_shell.launch("/bin/apt-get", "install metaxploit.so")
+    mx = include_lib("/lib/metaxploit.so")
+end if
+if not mx then exit("Error: Can't find metaxploit library in the /lib path or the current folder")
+if not is_valid_ip(params[0]) then exit("nmap: invalid ip address")
+tgtAddr = params[0]
 
 xpDB = []
 xpDBLookupScan = []
@@ -58,8 +66,8 @@ nmap = function(tgtAddr)
 	   router = get_router
 	else 
 	   router = get_router( ipAddress )
-	   info.push({"port": 0, "stat": "open", "service": "router", "version": router.kernel_version, "lan": router.local_ip})
 	end if
+	info.push({"port": 0, "stat": "open", "service": "router", "version": router.kernel_version, "lan": router.local_ip})
 
 	if router == null then exit("nmap: ip address not found")
 	ports = null
@@ -109,6 +117,8 @@ readDB = function()
 	db = c.File(current_path + "/l8.db")
 	xpRaw = db.get_content
 	globals.xpDB = []
+	globals.xpDBLookupScan = []
+	globals.xpDBLookupFull = []
 	for row in xpRaw.split(char(10))
         if row == "" then continue
 		raw = row.split("\|")
@@ -141,16 +151,28 @@ updateXP = function(xp, type, deets)
         end if
     end for
     writeDB()
+	xp.type = type
+	xp.deets = deets
+	return xp
 end function
 
-scan = function(addr, port)
+scan = function(addr, port, rescan = false)
+	readDB()
 	if port > 0 then net_session = mx.net_use( addr, port )
-	if port < 0 then net_session = mx.net_use( addr )
+	if port == 0 then net_session = mx.net_use( addr )
 	if not net_session then exit("Error: can't connect to net session")
 	metaLib = net_session.dump_lib
     scanLookup = metaLib.lib_name + "|" + metaLib.version
 	//see if scan is already in globals.xpDB
 	xpList = []
+	if rescan then 
+		while globals.xpDBLookupScan.indexOf(scanLookup) != null
+			idx = globals.xpDBLookupScan.indexOf(scanLookup)
+			globals.xpDBLookupFull.remove(idx)
+			globals.xpDBLookupScan.remove(idx)
+			globals.xpDB.remove(idx)
+		end while
+	end if
 	if globals.xpDBLookupScan.indexOf(scanLookup) != null then
         for i in globals.xpDB.indexes
             if globals.xpDBLookupScan[i] == scanLookup then
@@ -178,20 +200,48 @@ end function
 
 xploit = function(addr, port, xp)
 	if port > 0 then net_session = mx.net_use( addr, port )
-	if port < 0 then net_session = mx.net_use( addr )
+	if port == 0 then net_session = mx.net_use( addr )
 	if not net_session then exit("Error: can't connect to net session")
 	metaLib = net_session.dump_lib
 	result = metaLib.overflow(xp.entry, xp.seg)
 	// Need to add a section to xploit other types
 	if typeof(result) == "shell" then
-        updateXP(xp, "shell", "")
+        updateXP(xp, typeof(result), "")
 		result.start_terminal
     else if typeof(result) == "file" then
-		updateXP(xp, "file", "")
+		updateXP(xp, typeof(result), result.path)
 		print("Type: " + typeof(result) + " is not yet handled.")
+		print(result.get_content)
+    else if typeof(result) == "computer" then
+		updateXP(xp, typeof(result), "")
+        passwd_file = result.File("/etc/passwd")
+        print(passwd_file.get_content)
+    else if typeof(result) == "number" then
+		xresult = metaLib.overflow(xp.entry, xp.seg, "CPWce2Mk4lDafhw")
+		if xresult == 1 then
+			updateXP(xp, "number", "pw")
+		else if xresult == 0 then
+			choice = user_input(cA + char(10) + "IP to attempt reflect: " + cX, false, false)
+			xresult = metaLib.overflow(xp.entry, xp.seg, choice)
+			if typeof(xresult) == "shell" then 
+				updateXP(xp, "number", "reflect")
+				xresult.start_terminal
+			else if typeof(xresult) == "computer" then 
+				updateXP(xp, "number", "reflect")
+				passwd_file = xresult.File("/etc/passwd")
+				print(passwd_file.get_content)
+			else
+				updateXP(xp, "number", "")
+				print("Type: number: " + result + " is not yet handled.")
+			end if
+		else
+			updateXP(xp, "number", "")
+			print("Type: number: " + result + " is not yet handled.")
+		end if
 	else
 		print("Type: " + typeof(result) + " is not yet handled.")
 	end if
+	return xp
 end function
 
 getXpListDisp = function(xpList)
@@ -199,7 +249,7 @@ getXpListDisp = function(xpList)
     for xp in xpList
         scanLookup = xp.lib + "|" + xp.version + "|" + xp.entry + "|" + xp.seg
         if globals.xpDBLookupFull.indexOf(scanLookup) != null then
-            for i in globals.xpDB.indexes
+            for i in globals.xpDBLookupFull.indexes
                 if globals.xpDBLookupFull[i] == scanLookup then
                     if globals.xpDB[i][4] == "" then
                         dispOne = globals.xpDB[i][2]
@@ -237,20 +287,22 @@ main = function(tgtAddr)
 			showBanner()
 			chMain = menuSelect("srQl8 Main MENU", serListDisp)
 			if chMain <= servList.len then
-				print(servList[chMain - 1])
 				xpList = scan(tgtAddr, servList[chMain - 1].port)
-                print(xpList.len)
 				xpListDisp = getXpListDisp(xpList)
-                print(xpListDisp.len)
+				// print(xpList.len)
+				// print(xpListDisp.len)
 				while true
-					chXp = menuSelect("Select xploit", xpListDisp + [" Back"])
+					chXp = menuSelect("Select xploit", xpListDisp + [cA + " rescan" + cX, cError + " Back" + cX])
 					if chXp <= xpList.len then
 						xp = xpList[chXp - 1]
-						xploit(tgtAddr, servList[chMain - 1].port, xp)
+						xpList[chXp - 1] = xploit(tgtAddr, servList[chMain - 1].port, xp)
+					else if chXp == xpList.len + 1 then
+						xpList = scan(tgtAddr, servList[chMain - 1].port, true)
+						xpListDisp = getXpListDisp(xpList)
 					else
 						break
-						exit
 					end if
+					xpListDisp = getXpListDisp(xpList)
 				end while
 			else
 				print("exit")
@@ -258,7 +310,6 @@ main = function(tgtAddr)
 			end if
 		end while
 	end for
-	print(serv)
 end function
 
 dbBackup()

@@ -1,6 +1,10 @@
 s = get_shell
 c = s.host_computer
 
+dbWifiFileName = "wificrack.db"
+dbWifiFile = current_path + "/" + dbWifiFileName
+DBWifi = []
+
 cBorder  = "<color=#194721><b>"
 cX       = "</color></b>"
 cA  = "<color=#35c44d><b>"
@@ -18,7 +22,7 @@ hopMonList = []
 
 monList = [
 	{"name": "Host Log: ", "color": cError , "value": "Bad"},
-	{"name": "Host Proc: ", "color": cError , "value": "Bad"},
+	{"name": "Rotate Wifi: ", "color": cError , "value": "Bad"},
 	{"name": "Host Perm: ", "color": cError , "value": "Bad"},
 ]
 
@@ -90,25 +94,75 @@ getHops = function(s, c)
 		i = i + 1
 		if i == 1 then continue
 		co = sh.host_computer
+		if co == null then exit("Lost connection to " + hopList[i-2].split("@")[1])
 		fixLogs(co)
-		// Clear logs on router too
-		rshe = sh.connect_service("192.168.0.1", 22, "root", pw)
-		fixLogs(rshe)
+		// Clear logs on router too?
+		//rshe = sh.connect_service("192.168.0.1", 22, "root", pw)
+		//fixLogs(rshe)
 		ml = checkLogs(co, tml)
 		globals.hopMonList.push({"name": "Hop " + (i-1) + " " + hopList[i-2].split("@")[1] + ": ", "color": ml.color , "value": ml.value})
 	end for
 end function
 
+readWifiDB = function(c)
+	//db schema
+	//BSSID|ESSID|pw
+	dbFile = c.File(globals.dbWifiFile)
+	dbRaw = dbFile.get_content
+	globals.DBWifi = []
+	for row in dbRaw.split(char(10))
+		if row == "" then continue
+		if row.split("\|").len == 3 then globals.DBWifi.push(row)
+	end for
+end function
+
+rotateWifi = function(c)
+	rIndex = floor(rnd * (globals.DBWifi.len - 1))
+	inBSSID = globals.DBWifi[rIndex].split("\|")[0]
+	inESSID = globals.DBWifi[rIndex].split("\|")[1]
+	pw = globals.DBWifi[rIndex].split("\|")[2]
+	cResult = c.connect_wifi("wlan0", inBSSID, inESSID, pw)
+	if typeof(cResult) == "string" then
+		monList[1].color = cError
+		monList[1].value = "Bad"
+	else
+		monList[1].color = cGood
+		monList[1].value = "Good"
+	end if
+	wait(1)
+end function
+
+lockdown = function(c)
+    if not c.File("/").has_permission("w") then
+		monList[2].color = cError
+		monList[2].value = "Bad"
+        return
+    end if
+    c.File("/").chmod("o-rwx", 1)
+    c.File("/").chmod("g-rwx", 1)
+    c.File("/").chmod("u-rwx", 1)
+    for path in ["/bin/sudo", "/bin/psudo", "/bin/ssh", "/usr/bin/Terminal.exe", "/usr/bin/Chat.exe", "/usr/bin/Mail.exe", "/bin/bash"]
+        f = c.File(path)
+        if f then f.chmod("g+x", 0)
+    end for
+    f = c.File("/etc/init.d")
+	if f then f.chmod("g+x", 1)
+	monList[2].color = cGood
+	monList[2].value = "Good"
+end function
+
+readWifiDB(c)
 while true
-	for i in range(4)
+	for i in range(30)
+		if i == 30 then rotateWifi(c)
+		if i == 10 then lockdown(c)
 		wait(1)
-		if i == 4 then fixLogs(c)
+		if i % 5 == 4 then fixLogs(c)
 		//check logs
 		monList[0] = checkLogs(c, monList[0])
 		//check hops
-		if i == 2 then getHops(s, c)
-		//check proc
-		//check perms
-		display(i)
+		if i % 5 == 2 then getHops(s, c)
+		//rotate wifi
+		display(i % 5)
 	end for
 end while

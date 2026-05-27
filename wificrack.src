@@ -1,0 +1,87 @@
+cryptools = include_lib("/lib/crypto.so")
+if not cryptools then exit("Error: Missing crypto library")
+DB = []
+DBLookup = []
+dbFileName = "wificrack.db"
+dbFile = current_path + "/" + dbFileName
+
+c = get_shell.host_computer
+
+
+cGood  = "<color=#3b42c4><b>"
+cX       = "</color></b>"
+
+// Check crack file db
+dbBackup = function()
+	db = c.File(globals.dbFile)
+	if db == null then
+		c.touch(current_path + "/", globals.dbFileName)
+	else
+		dbb = c.File(globals.dbFile + ".bak")
+		if dbb == null then
+			db.copy(current_path + "/", globals.dbFileName + ".bak")
+		else
+			dbb.delete
+			db.copy(current_path + "/", globals.dbFileName + ".bak")
+		end if
+	end if	
+end function
+
+readDB = function()
+	//db schema
+	//BSSID|ESSID|pw
+	db = c.File(globals.dbFile)
+	dbRaw = db.get_content
+	globals.DB = []
+	globals.DBLookup = []
+	for row in dbRaw.split(char(10))
+        if row == "" then continue
+		rawColsNum = row.split("\|").len
+		if rawColsNum < 3 then row = row + "|"*(3-rawColsNum)
+		if rawColsNum > 3 then row = row.split("\|")[:3].join("|")
+		globals.DB.push(row)
+		globals.DBLookup.push(row.split("\|")[:2].join("|"))
+	end for
+end function
+
+writeDB = function()
+	db = c.File(globals.dbFile)
+	out = ""
+	for row in globals.DB
+        if row == "" then continue
+		rawColsNum = row.split("\|").len
+		if rawColsNum < 3 then row = row + "|"*(3-rawColsNum)
+		if rawColsNum > 3 then row = row.split("\|")[:3].join("|")
+		out = out + row + char(10)
+	end for
+	db.set_content(out)
+    readDB()
+end function
+
+crack = function(BSSID, ESSID, ACKS)
+	print(cGood + "Cracking " + ESSID + " (" + BSSID + ") with " + ACKS + " ACKs"+ cX)
+	cryptools.airmon("start", "wlan0")
+	cryptools.aireplay(BSSID, ESSID, ACKS)
+	key = cryptools.aircrack(home_dir + "/file.cap")
+	print("Key found: " + cGood + key + cX)
+	cryptools.airmon("stop", "wlan0")
+	return key
+end function
+
+main = function()
+	networks = c.wifi_networks
+	for n in c.wifi_networks("wlan0")
+		BSSID = n.split(" ")[0]
+		ACKS = 300000 / (n.split(" ")[1][:-1].to_int + 15)
+		ESSID = n.split(" ")[2]
+		if globals.DBLookup.indexOf(BSSID + "|" + ESSID) != null then continue
+		key = crack(BSSID, ESSID, ACKS)
+		if key == null then exit("Error: Key not found for " + ESSID + " (" + BSSID + ")")
+		globals.DB.push(BSSID + "|" + ESSID + "|" + key)
+		writeDB()
+	end for
+end function
+
+dbBackup()
+readDB()
+main()
